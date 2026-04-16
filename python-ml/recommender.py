@@ -57,36 +57,35 @@ def build_user_item_matrix(df):
     """
     Build a matrix where:
       rows    = customers
-      columns = products (by Product Code)
-      values  = quantity purchased (0 if never bought)
+      columns = Product+Brand combinations (e.g. "Laptop_Apple")
+      values  = total quantity purchased
 
-    Example:
-                  88EB4558  416DFEEB  9F975B08 ...
-    William Hess     6         0         0
-    Larry Smith      0         1         0
+    We use Product+Brand instead of Product Code because every
+    Product Code is unique — no two customers share the same code,
+    making all similarities 0. Product+Brand gives real overlap.
     """
-    # Get unique customers and product codes
-    customers = df["Customer Name"].unique().tolist()
-    products  = df["Product Code"].unique().tolist()
+    # Create a product key from Product + Brand
+    df = df.copy()
+    df["product_key"] = df["Product"] + "_" + df["Brand"]
 
-    # Build index lookups for speed
+    customers    = df["Customer Name"].unique().tolist()
+    product_keys = df["product_key"].unique().tolist()
+
     customer_index = {c: i for i, c in enumerate(customers)}
-    product_index  = {p: i for i, p in enumerate(products)}
+    product_index  = {p: i for i, p in enumerate(product_keys)}
 
-    # Create empty matrix (list of lists, all zeros)
+    # Empty matrix
     matrix = []
     for _ in customers:
-        matrix.append([0] * len(products))
+        matrix.append([0] * len(product_keys))
 
-    # Fill in purchase quantities
+    # Fill in quantities
     for _, row in df.iterrows():
         c_idx = customer_index[row["Customer Name"]]
-        p_idx = product_index[row["Product Code"]]
+        p_idx = product_index[row["product_key"]]
         matrix[c_idx][p_idx] += row["Quantity Sold"]
 
-    return matrix, customers, products, customer_index, product_index
-
-
+    return matrix, customers, product_keys, customer_index, product_index
 def find_similar_users(target_customer, matrix, customers,
                        customer_index, top_n=5):
     """
@@ -117,16 +116,15 @@ def collaborative_recommend(target_customer, df, matrix, customers,
                             products, customer_index, product_index,
                             top_n=5):
     """
-    Recommend products to target_customer by:
-    1. Finding similar users
-    2. Looking at what they bought
-    3. Filtering out what target already bought
-    4. Ranking by how many similar users bought each product
+    Recommend product+brand combos based on similar users' purchases.
     """
     if target_customer not in customer_index:
         return []
 
-    # Products the target customer already bought
+    df = df.copy()
+    df["product_key"] = df["Product"] + "_" + df["Brand"]
+
+    # What has target already bought
     target_idx     = customer_index[target_customer]
     already_bought = set()
     for p_idx, qty in enumerate(matrix[target_idx]):
@@ -138,40 +136,37 @@ def collaborative_recommend(target_customer, df, matrix, customers,
         target_customer, matrix, customers, customer_index, top_n=10
     )
 
-    # Count how many similar users bought each product
+    # Score products bought by similar users
     product_score = {}
     for similar_customer, similarity in similar_users:
         s_idx = customer_index[similar_customer]
         for p_idx, qty in enumerate(matrix[s_idx]):
             if qty > 0:
-                product_code = products[p_idx]
-                if product_code not in already_bought:
-                    if product_code not in product_score:
-                        product_score[product_code] = 0
-                    # Weight by similarity score
-                    product_score[product_code] += similarity * qty
+                key = products[p_idx]
+                if key not in already_bought:
+                    if key not in product_score:
+                        product_score[key] = 0
+                    product_score[key] += similarity * qty
 
-    # Sort by score and take top N
-    ranked = sorted(product_score.items(), key=lambda x: x[1], reverse=True)
-    top_codes = [code for code, score in ranked[:top_n]]
+    # Sort and take top N
+    ranked    = sorted(product_score.items(), key=lambda x: x[1], reverse=True)
+    top_keys  = [key for key, score in ranked[:top_n]]
 
-    # Get full product details for the recommended codes
+    # Build result using product_key to look up details
     recommendations = []
-    for code in top_codes:
-        match = df[df["Product Code"] == code]
+    for key in top_keys:
+        match = df[df["product_key"] == key]
         if not match.empty:
             row = match.iloc[0]
             recommendations.append({
-                "product_code": code,
-                "product":      row["Product"],
-                "brand":        row["Brand"],
-                "price":        row["Price"],
-                "score":        round(product_score[code], 4)
+                "product_key": key,
+                "product":     row["Product"],
+                "brand":       row["Brand"],
+                "price":       row["Price"],
+                "score":       round(product_score[key], 4)
             })
 
     return recommendations
-
-
 # ════════════════════════════════════════════════════════════════
 #  PART 2 — CONTENT-BASED FILTERING
 #  "Similar products to this one, based on specs"
@@ -287,8 +282,8 @@ def content_based_recommend(target_code, product_vectors,
 # ════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
-    df = load_and_prepare()
-
+    df = load_and_prepare(sample_for_recommender=True)
+    
     print("=" * 55)
     print("  PART 1 — Collaborative Filtering")
     print("=" * 55)

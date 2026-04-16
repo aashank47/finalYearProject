@@ -1,6 +1,6 @@
 # app.py
-# Flask REST API — serves our Linear Regression model.
-# Node.js will call this to get demand predictions.
+# Flask REST API — serves Linear Regression + Recommendation Engine
+# Phase 1 + Phase 2 complete
 
 from flask import Flask, request, jsonify
 from data_prep import load_and_prepare, normalize, denormalize
@@ -12,13 +12,15 @@ from recommender import (
 
 app = Flask(__name__)
 
-# ── Train the model once when the server starts ──────────────────────────────
-# We don't retrain on every request — that would be too slow.
+#  1. Load datasets 
 
-print("Loading data and training model...")
+print("Loading data...")
+df     = load_and_prepare(sample_for_recommender=False)  # full 50k for ML
+df_rec = load_and_prepare(sample_for_recommender=True)   # 5k for recommender
 
-df = load_and_prepare()
+#  2. Train Linear Regression 
 
+print("\nTraining demand prediction model...")
 prices   = df["Price"].tolist()
 qty_sold = df["Quantity Sold"].tolist()
 
@@ -26,58 +28,72 @@ x_norm, X_MIN, X_MAX = normalize(prices)
 y_norm, Y_MIN, Y_MAX = normalize(qty_sold)
 
 x_train, y_train, x_test, y_test = train_test_split(x_norm, y_norm)
-
 M, B = train(x_train, y_train, learning_rate=0.1, epochs=2000)
 
-# Evaluate and store accuracy
 test_preds = [predict(x, M, B) for x in x_test]
 TEST_MSE   = mean_squared_error(y_test, test_preds)
+print(f"Demand model ready. MSE: {TEST_MSE:.6f}")
 
-print(f"Model ready. Test MSE: {TEST_MSE:.6f}\n")
+# ── 3. Build Recommendation Engine ───────────────────────────────────────────
 
-# recommendation engine setup
-print("Building recommendation engine...")
-matrix, customers, products_list, c_idx, p_idx = build_user_item_matrix(df)
-p_vectors, p_details = build_product_features(df)
-print(f"Ready. {len(customers)} customers, {len(products_list)} products.\n")
+print("\nBuilding recommendation engine...")
+matrix, customers, products_list, c_idx, p_idx = build_user_item_matrix(df_rec)
+p_vectors, p_details = build_product_features(df_rec)
+print(f"Recommender ready. "
+      f"{len(customers)} customers, {len(products_list)} product types.\n")
 
-# ── Route 1: Health check ────────────────────────────────────────────────────
+
+# ════════════════════════════════════════════════════════════════════════════
+#  DEMAND PREDICTION ROUTES
+# ════════════════════════════════════════════════════════════════════════════
 
 @app.route("/", methods=["GET"])
 def home():
     return jsonify({
-        "status": "running",
-        "model":  "Linear Regression (from scratch)",
-        "mse":    round(TEST_MSE, 6)
+        "status":   "running",
+        "routes": {
+            "GET  /":                    "health check",
+            "GET  /model/info":          "model details",
+            "POST /predict":             "predict demand for one price",
+            "POST /predict/batch":       "predict demand for multiple prices",
+            "POST /recommend/user":      "collaborative filtering",
+            "POST /recommend/product":   "content-based filtering",
+            "GET  /customers":           "sample customer names",
+            "GET  /products":            "sample product codes"
+        }
     })
 
 
-# ── Route 2: Predict demand for a given price ────────────────────────────────
+@app.route("/model/info", methods=["GET"])
+def model_info():
+    return jsonify({
+        "algorithm":   "Linear Regression + Gradient Descent (from scratch)",
+        "trained_on":  len(x_train),
+        "tested_on":   len(x_test),
+        "features":    ["Price"],
+        "target":      "Quantity Sold",
+        "slope_m":     round(M, 6),
+        "intercept_b": round(B, 6),
+        "test_mse":    round(TEST_MSE, 6),
+        "price_range": {"min": X_MIN, "max": X_MAX},
+        "qty_range":   {"min": Y_MIN, "max": Y_MAX}
+    })
+
 
 @app.route("/predict", methods=["POST"])
 def predict_demand():
-    """
-    Expects JSON body: { "price": 75000 }
-    Returns:          { "price": 75000, "predicted_quantity": 5.4 }
-    """
     data = request.get_json()
-
-    # Validate input
     if not data or "price" not in data:
-        return jsonify({"error": "Please send a JSON body with a 'price' field"}), 400
+        return jsonify({"error": "Send JSON with a 'price' field"}), 400
 
     price = float(data["price"])
-
     if price < 0:
         return jsonify({"error": "Price cannot be negative"}), 400
 
-    # Normalize → predict → denormalize
-    price_norm   = (price - X_MIN) / (X_MAX - X_MIN)
-    qty_norm     = predict(price_norm, M, B)
-    qty_real     = denormalize(qty_norm, Y_MIN, Y_MAX)
-
-    # Clamp to valid range (1–10)
-    qty_real = max(1.0, min(10.0, qty_real))
+    price_norm = (price - X_MIN) / (X_MAX - X_MIN)
+    qty_norm   = predict(price_norm, M, B)
+    qty_real   = denormalize(qty_norm, Y_MIN, Y_MAX)
+    qty_real   = max(1.0, min(10.0, qty_real))
 
     return jsonify({
         "price":              price,
@@ -86,18 +102,11 @@ def predict_demand():
     })
 
 
-# ── Route 3: Predict for multiple prices at once ─────────────────────────────
-
 @app.route("/predict/batch", methods=["POST"])
 def predict_batch():
-    """
-    Expects JSON body: { "prices": [10000, 50000, 100000] }
-    Returns list of predictions.
-    """
     data = request.get_json()
-
     if not data or "prices" not in data:
-        return jsonify({"error": "Please send a JSON body with a 'prices' list"}), 400
+        return jsonify({"error": "Send JSON with a 'prices' list"}), 400
 
     results = []
     for price in data["prices"]:
@@ -106,7 +115,6 @@ def predict_batch():
         qty_norm   = predict(price_norm, M, B)
         qty_real   = denormalize(qty_norm, Y_MIN, Y_MAX)
         qty_real   = max(1.0, min(10.0, qty_real))
-
         results.append({
             "price":              price,
             "predicted_quantity": round(qty_real, 2)
@@ -115,85 +123,77 @@ def predict_batch():
     return jsonify({"predictions": results})
 
 
-# ── Route 4: Model info ──────────────────────────────────────────────────────
-
-@app.route("/model/info", methods=["GET"])
-def model_info():
-    return jsonify({
-        "algorithm":     "Linear Regression with Gradient Descent",
-        "trained_on":    len(x_train),
-        "tested_on":     len(x_test),
-        "features":      ["Price"],
-        "target":        "Quantity Sold",
-        "slope_m":       round(M, 6),
-        "intercept_b":   round(B, 6),
-        "test_mse":      round(TEST_MSE, 6),
-        "price_range":   {"min": X_MIN, "max": X_MAX},
-        "qty_range":     {"min": Y_MIN, "max": Y_MAX}
-    })
-
-
-# ── Route 5: Collaborative Filtering recommendations ─────────────────────────
+# ════════════════════════════════════════════════════════════════════════════
+#  RECOMMENDATION ROUTES
+# ════════════════════════════════════════════════════════════════════════════
 
 @app.route("/recommend/user", methods=["POST"])
 def recommend_for_user():
-    """
-    Expects: { "customer_name": "William Hess" }
-    Returns: list of recommended products
-    """
     data = request.get_json()
     if not data or "customer_name" not in data:
-        return jsonify({"error": "Send a JSON body with 'customer_name'"}), 400
+        return jsonify({"error": "Send JSON with 'customer_name'"}), 400
 
     recs = collaborative_recommend(
-        data["customer_name"], df, matrix,
-        customers, products_list, c_idx, p_idx
+        data["customer_name"], df_rec,
+        matrix, customers, products_list, c_idx, p_idx
     )
 
     if not recs:
-        return jsonify({"error": "Customer not found"}), 404
+        return jsonify({
+            "error": "Customer not found or no similar users.",
+            "tip":   "Use GET /customers to see available names"
+        }), 404
 
     return jsonify({
         "customer":        data["customer_name"],
+        "algorithm":       "Collaborative Filtering (cosine similarity)",
         "recommendations": recs
     })
 
 
-# ── Route 6: Content-Based recommendations ───────────────────────────────────
-
 @app.route("/recommend/product", methods=["POST"])
 def recommend_similar_products():
-    """
-    Expects: { "product_code": "88EB4558" }
-    Returns: list of similar products
-    """
     data = request.get_json()
     if not data or "product_code" not in data:
-        return jsonify({"error": "Send a JSON body with 'product_code'"}), 400
+        return jsonify({"error": "Send JSON with 'product_code'"}), 400
 
     similar = content_based_recommend(
         data["product_code"], p_vectors, p_details
     )
 
     if not similar:
-        return jsonify({"error": "Product code not found"}), 404
+        return jsonify({
+            "error": "Product code not found.",
+            "tip":   "Use GET /products to see available codes"
+        }), 404
 
     return jsonify({
-        "product_code":    data["product_code"],
+        "product_code":     data["product_code"],
+        "algorithm":        "Content-Based Filtering (cosine similarity)",
         "similar_products": similar
     })
 
 
-# ── Route 7: List available customers (for testing) ──────────────────────────
-
 @app.route("/customers", methods=["GET"])
 def list_customers():
+    """Helper route — returns sample customer names for testing."""
     return jsonify({
-        "total":     len(customers),
-        "sample":    customers[:10]
+        "total":  len(customers),
+        "sample": customers[:15]
     })
 
-# ── Start server ─────────────────────────────────────────────────────────────
+
+@app.route("/products", methods=["GET"])
+def list_products():
+    """Helper route — returns sample product codes for testing."""
+    codes = list(p_vectors.keys())
+    return jsonify({
+        "total":  len(codes),
+        "sample": codes[:15]
+    })
+
+
+# ── Start server ──────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     app.run(debug=True, port=5000)

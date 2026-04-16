@@ -4,31 +4,37 @@
 
 import pandas as pd
 
-def load_and_prepare():
+def load_and_prepare(sample_for_recommender=False):
     df = pd.read_csv("data/ecommerce.csv")
 
-    # ── Keep only the columns we need ───────────────────────────────────────
-    df = df[["Product", "Brand", "Price", "Quantity Sold",
-             "Inward Date", "RAM", "ROM"]]
+    df = df[["Product", "Brand", "Product Code", "Price", "Quantity Sold",
+             "Inward Date", "Customer Name", "Region", "RAM", "ROM"]]
 
-    # ── Extract month number from Inward Date ────────────────────────────────
-    # "2023-08-02" → 8
-    # We'll use this as a feature: sales might vary by month
     df["Month"] = pd.to_datetime(df["Inward Date"]).dt.month
 
-    # ── Remove any rows with missing Price or Quantity Sold ──────────────────
     df = df.dropna(subset=["Price", "Quantity Sold"])
 
-    # ── Convert to plain numbers (they might be stored as text) ─────────────
     df["Price"]         = df["Price"].astype(float)
     df["Quantity Sold"] = df["Quantity Sold"].astype(float)
 
-    print(f"Dataset ready: {len(df)} rows")
+    if sample_for_recommender:
+        # Keep only customers who appear at least 3 times
+        # These are the only users we can meaningfully compare
+        purchase_counts = df["Customer Name"].value_counts()
+        repeat_customers = purchase_counts[purchase_counts >= 3].index
+        df = df[df["Customer Name"].isin(repeat_customers)]
+
+        # Also cap at 5000 rows so the matrix stays small
+        df = df.head(5000)
+
+        print(f"Recommender dataset: {len(df)} rows, "
+              f"{df['Customer Name'].nunique()} customers, "
+              f"{df['Product Code'].nunique()} products")
+    else:
+        print(f"Dataset ready: {len(df)} rows")
+
     print(df[["Product", "Price", "Quantity Sold", "Month"]].head(10))
-
     return df
-
-
 def normalize(values):
     """
     Scale values to 0-1 range so gradient descent works properly.
