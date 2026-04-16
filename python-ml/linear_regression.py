@@ -102,7 +102,7 @@ if __name__ == "__main__":
     print("\nTraining started — watch the MSE drop:\n")
 
     # 5. Train
-    m, b = train(x_train, y_train, learning_rate=0.01, epochs=1000)
+    m, b = train(x_train, y_train, learning_rate=0.1, epochs=2000)
 
     # 6. Evaluate on the test set
     test_predictions = [predict(x, m, b) for x in x_test]
