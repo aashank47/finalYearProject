@@ -1,70 +1,36 @@
 # recommender.py
-# Collaborative Filtering + Content-Based Filtering
-# Built entirely from scratch. No surprise libraries.
-
-import pandas as pd
 import math
+import pandas as pd
 from data_prep import load_and_prepare
 
 
-# ════════════════════════════════════════════════════════════════
-#  CORE MATH — used by both algorithms
-# ════════════════════════════════════════════════════════════════
+# ── Core math ────────────────────────────────────────────────────────────────
 
-def dot_product(vec_a, vec_b):
-    """
-    Multiply matching pairs and sum them.
-    [1,2,3] · [4,5,6] = 1×4 + 2×5 + 3×6 = 32
-    """
+def dot_product(a, b):
     total = 0
-    for i in range(len(vec_a)):
-        total += vec_a[i] * vec_b[i]
+    for i in range(len(a)):
+        total += a[i] * b[i]
     return total
 
 
 def magnitude(vec):
-    """
-    Length of a vector = square root of sum of squares.
-    |[3,4]| = √(9+16) = √25 = 5
-    """
     total = 0
     for v in vec:
         total += v ** 2
     return math.sqrt(total)
 
 
-def cosine_similarity(vec_a, vec_b):
-    """
-    How similar are two vectors? Returns 0.0 to 1.0.
-    1.0 = identical direction, 0.0 = nothing in common.
-    """
-    mag_a = magnitude(vec_a)
-    mag_b = magnitude(vec_b)
-
-    # Avoid division by zero (empty vector)
+def cosine_similarity(a, b):
+    mag_a = magnitude(a)
+    mag_b = magnitude(b)
     if mag_a == 0 or mag_b == 0:
         return 0.0
+    return dot_product(a, b) / (mag_a * mag_b)
 
-    return dot_product(vec_a, vec_b) / (mag_a * mag_b)
 
-
-# ════════════════════════════════════════════════════════════════
-#  PART 1 — COLLABORATIVE FILTERING
-#  "Users who bought what you bought, also bought this"
-# ════════════════════════════════════════════════════════════════
+# ── Collaborative Filtering ──────────────────────────────────────────────────
 
 def build_user_item_matrix(df):
-    """
-    Build a matrix where:
-      rows    = customers
-      columns = Product+Brand combinations (e.g. "Laptop_Apple")
-      values  = total quantity purchased
-
-    We use Product+Brand instead of Product Code because every
-    Product Code is unique — no two customers share the same code,
-    making all similarities 0. Product+Brand gives real overlap.
-    """
-    # Create a product key from Product + Brand
     df = df.copy()
     df["product_key"] = df["Product"] + "_" + df["Brand"]
 
@@ -74,120 +40,85 @@ def build_user_item_matrix(df):
     customer_index = {c: i for i, c in enumerate(customers)}
     product_index  = {p: i for i, p in enumerate(product_keys)}
 
-    # Empty matrix
-    matrix = []
-    for _ in customers:
-        matrix.append([0] * len(product_keys))
+    matrix = [[0] * len(product_keys) for _ in customers]
 
-    # Fill in quantities
     for _, row in df.iterrows():
-        c_idx = customer_index[row["Customer Name"]]
-        p_idx = product_index[row["product_key"]]
-        matrix[c_idx][p_idx] += row["Quantity Sold"]
+        c = customer_index[row["Customer Name"]]
+        p = product_index[row["product_key"]]
+        matrix[c][p] += row["Quantity Sold"]
 
     return matrix, customers, product_keys, customer_index, product_index
-def find_similar_users(target_customer, matrix, customers,
-                       customer_index, top_n=5):
-    """
-    Find the top N users most similar to the target customer.
-    Similarity is measured by cosine similarity of their
-    purchase history vectors.
-    """
-    if target_customer not in customer_index:
+
+
+def find_similar_users(target, matrix, customers, customer_index, top_n=10):
+    if target not in customer_index:
         return []
-
-    target_idx    = customer_index[target_customer]
-    target_vector = matrix[target_idx]
-
-    similarities = []
+    t_idx  = customer_index[target]
+    t_vec  = matrix[t_idx]
+    scores = []
     for i, customer in enumerate(customers):
-        if customer == target_customer:
-            continue   # skip comparing to self
-
-        sim = cosine_similarity(target_vector, matrix[i])
-        similarities.append((customer, sim))
-
-    # Sort by similarity descending, take top N
-    similarities.sort(key=lambda x: x[1], reverse=True)
-    return similarities[:top_n]
+        if customer == target:
+            continue
+        sim = cosine_similarity(t_vec, matrix[i])
+        scores.append((customer, sim))
+    scores.sort(key=lambda x: x[1], reverse=True)
+    return scores[:top_n]
 
 
-def collaborative_recommend(target_customer, df, matrix, customers,
-                            products, customer_index, product_index,
-                            top_n=5):
-    """
-    Recommend product+brand combos based on similar users' purchases.
-    """
-    if target_customer not in customer_index:
+def collaborative_recommend(target, df, matrix, customers,
+                            product_keys, customer_index,
+                            product_index, top_n=5):
+    if target not in customer_index:
         return []
 
     df = df.copy()
     df["product_key"] = df["Product"] + "_" + df["Brand"]
 
-    # What has target already bought
-    target_idx     = customer_index[target_customer]
+    t_idx          = customer_index[target]
     already_bought = set()
-    for p_idx, qty in enumerate(matrix[target_idx]):
+    for p_idx, qty in enumerate(matrix[t_idx]):
         if qty > 0:
-            already_bought.add(products[p_idx])
+            already_bought.add(product_keys[p_idx])
 
-    # Find similar users
     similar_users = find_similar_users(
-        target_customer, matrix, customers, customer_index, top_n=10
+        target, matrix, customers, customer_index
     )
 
-    # Score products bought by similar users
     product_score = {}
     for similar_customer, similarity in similar_users:
         s_idx = customer_index[similar_customer]
         for p_idx, qty in enumerate(matrix[s_idx]):
             if qty > 0:
-                key = products[p_idx]
+                key = product_keys[p_idx]
                 if key not in already_bought:
-                    if key not in product_score:
-                        product_score[key] = 0
-                    product_score[key] += similarity * qty
+                    product_score[key] = (
+                        product_score.get(key, 0) + similarity * qty
+                    )
 
-    # Sort and take top N
-    ranked    = sorted(product_score.items(), key=lambda x: x[1], reverse=True)
-    top_keys  = [key for key, score in ranked[:top_n]]
+    ranked   = sorted(product_score.items(),
+                      key=lambda x: x[1], reverse=True)
+    top_keys = [k for k, _ in ranked[:top_n]]
 
-    # Build result using product_key to look up details
-    recommendations = []
+    results = []
     for key in top_keys:
         match = df[df["product_key"] == key]
         if not match.empty:
             row = match.iloc[0]
-            recommendations.append({
+            results.append({
                 "product_key": key,
                 "product":     row["Product"],
                 "brand":       row["Brand"],
                 "price":       row["Price"],
                 "score":       round(product_score[key], 4)
             })
+    return results
 
-    return recommendations
-# ════════════════════════════════════════════════════════════════
-#  PART 2 — CONTENT-BASED FILTERING
-#  "Similar products to this one, based on specs"
-# ════════════════════════════════════════════════════════════════
+
+# ── Content-Based Filtering ──────────────────────────────────────────────────
 
 def build_product_features(df):
-    """
-    Turn each product's specs into a numeric vector.
-
-    We encode:
-      - Price        (normalized 0-1)
-      - Quantity     (normalized 0-1)
-      - Product type (Laptop=1, Mobile=0)
-      - RAM          (extracted number: 8GB → 8)
-      - ROM          (extracted number: 128GB → 128)
-
-    One row per unique Product Code.
-    """
 
     def extract_gb(value):
-        """'8GB' → 8,  '256GB' → 256,  '1TB' → 1024"""
         if pd.isna(value):
             return 0
         value = str(value).upper().strip()
@@ -205,28 +136,22 @@ def build_product_features(df):
             return [0.5] * len(values)
         return [(v - min_v) / diff for v in values]
 
-    # One entry per unique product code
     unique = df.drop_duplicates(subset="Product Code").copy()
     unique = unique.reset_index(drop=True)
 
-    prices  = normalize_list(unique["Price"].tolist())
-    qtys    = normalize_list(unique["Quantity Sold"].tolist())
-    rams    = normalize_list([extract_gb(r) for r in unique["RAM"].tolist()])
-    roms    = normalize_list([extract_gb(r) for r in unique["ROM"].tolist()])
-    is_laptop = [1 if p == "Laptop" else 0 for p in unique["Product"].tolist()]
+    prices    = normalize_list(unique["Price"].tolist())
+    qtys      = normalize_list(unique["Quantity Sold"].tolist())
+    rams      = normalize_list([extract_gb(r) for r in unique["RAM"]])
+    roms      = normalize_list([extract_gb(r) for r in unique["ROM"]])
+    is_laptop = [1 if p == "Laptop" else 0 for p in unique["Product"]]
 
-    # Build feature vectors — one per product
     product_vectors = {}
     product_details = {}
 
     for i in range(len(unique)):
         code = unique.iloc[i]["Product Code"]
         product_vectors[code] = [
-            prices[i],
-            qtys[i],
-            rams[i],
-            roms[i],
-            is_laptop[i]
+            prices[i], qtys[i], rams[i], roms[i], is_laptop[i]
         ]
         product_details[code] = {
             "product": unique.iloc[i]["Product"],
@@ -241,89 +166,79 @@ def build_product_features(df):
 
 def content_based_recommend(target_code, product_vectors,
                             product_details, top_n=5):
-    """
-    Find the top N products most similar to target_code
-    based on their feature vectors.
-    """
     if target_code not in product_vectors:
         return []
 
-    target_vector = product_vectors[target_code]
+    target_vec = product_vectors[target_code]
+    scores     = []
 
-    similarities = []
-    for code, vector in product_vectors.items():
+    for code, vec in product_vectors.items():
         if code == target_code:
             continue
-        sim = cosine_similarity(target_vector, vector)
-        similarities.append((code, sim))
+        sim = cosine_similarity(target_vec, vec)
+        scores.append((code, sim))
 
-    # Sort by similarity
-    similarities.sort(key=lambda x: x[1], reverse=True)
-    top = similarities[:top_n]
+    scores.sort(key=lambda x: x[1], reverse=True)
 
-    recommendations = []
-    for code, sim in top:
-        details = product_details[code]
-        recommendations.append({
+    results = []
+    for code, sim in scores[:top_n]:
+        d = product_details[code]
+        results.append({
             "product_code": code,
-            "product":      details["product"],
-            "brand":        details["brand"],
-            "price":        details["price"],
-            "ram":          details["ram"],
-            "rom":          details["rom"],
+            "product":      d["product"],
+            "brand":        d["brand"],
+            "price":        d["price"],
+            "ram":          d["ram"],
+            "rom":          d["rom"],
             "similarity":   round(sim, 4)
         })
+    return results
 
-    return recommendations
 
-
-# ════════════════════════════════════════════════════════════════
-#  TEST — run both algorithms
-# ════════════════════════════════════════════════════════════════
+# ── Test ─────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    df = load_and_prepare(sample_for_recommender=True)
-    
-    print("=" * 55)
+    df = load_and_prepare()
+
+    print("\n" + "=" * 55)
     print("  PART 1 — Collaborative Filtering")
     print("=" * 55)
 
-    print("\nBuilding user-item matrix...")
-    matrix, customers, products, c_idx, p_idx = build_user_item_matrix(df)
-    print(f"Matrix size: {len(customers)} customers x {len(products)} products")
+    matrix, customers, product_keys, c_idx, p_idx = \
+        build_user_item_matrix(df)
+    print(f"Matrix: {len(customers)} customers x "
+          f"{len(product_keys)} product types")
 
-    # Pick first customer as test
     test_customer = customers[0]
-    print(f"\nFinding recommendations for: {test_customer}")
+    print(f"\nRecommendations for: {test_customer}")
 
     recs = collaborative_recommend(
-        test_customer, df, matrix, customers, products, c_idx, p_idx
+        test_customer, df, matrix, customers,
+        product_keys, c_idx, p_idx
     )
 
-    print(f"\nTop recommendations:")
-    for r in recs:
-        print(f"  {r['brand']:12} {r['product']:15} "
-              f"₹{r['price']:>8,.0f}   score: {r['score']}")
+    if recs:
+        for r in recs:
+            print(f"  {r['brand']:12} {r['product']:15} "
+                  f"₹{r['price']:>8,.0f}   score: {r['score']}")
+    else:
+        print("  No recommendations found for this customer.")
+        print(f"  Try another — sample customers: {customers[1:4]}")
 
     print("\n" + "=" * 55)
     print("  PART 2 — Content-Based Filtering")
     print("=" * 55)
 
-    print("\nBuilding product feature vectors...")
     p_vectors, p_details = build_product_features(df)
-    print(f"Built vectors for {len(p_vectors)} unique products")
+    print(f"Vectors built for {len(p_vectors)} unique products")
 
-    # Pick first product code as test
     test_code = list(p_vectors.keys())[0]
-    test_info = p_details[test_code]
-    print(f"\nFinding products similar to:")
-    print(f"  {test_info['brand']} {test_info['product']} "
-          f"| ₹{test_info['price']:,} | RAM: {test_info['ram']}")
+    info      = p_details[test_code]
+    print(f"\nSimilar to: {info['brand']} {info['product']} "
+          f"| ₹{info['price']:,} | RAM: {info['ram']}")
 
     similar = content_based_recommend(test_code, p_vectors, p_details)
-
-    print(f"\nMost similar products:")
     for r in similar:
         print(f"  {r['brand']:12} {r['product']:15} "
-              f"₹{r['price']:>8,.0f}  RAM:{r['ram']:6}  "
+              f"₹{r['price']:>8,.0f}  RAM: {r['ram']:6}  "
               f"similarity: {r['similarity']}")

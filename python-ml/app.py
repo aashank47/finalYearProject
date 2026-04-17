@@ -15,9 +15,8 @@ app = Flask(__name__)
 #  1. Load datasets 
 
 print("Loading data...")
-df     = load_and_prepare(sample_for_recommender=False)  # full 50k for ML
-df_rec = load_and_prepare(sample_for_recommender=True)   # 5k for recommender
-
+df     = load_and_prepare()
+df_rec = df.copy()
 #  2. Train Linear Regression 
 
 print("\nTraining demand prediction model...")
