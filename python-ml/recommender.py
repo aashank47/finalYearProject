@@ -80,12 +80,15 @@ def collaborative_recommend(target, df, matrix, customers,
         if qty > 0:
             already_bought.add(product_keys[p_idx])
 
+    # ── Try collaborative filtering first ────────────────────────────────────
     similar_users = find_similar_users(
         target, matrix, customers, customer_index
     )
 
     product_score = {}
     for similar_customer, similarity in similar_users:
+        if similarity == 0:
+            continue                     # skip users with zero similarity
         s_idx = customer_index[similar_customer]
         for p_idx, qty in enumerate(matrix[s_idx]):
             if qty > 0:
@@ -95,6 +98,24 @@ def collaborative_recommend(target, df, matrix, customers,
                         product_score.get(key, 0) + similarity * qty
                     )
 
+    # ── Fallback: popularity-based if no collaborative results ───────────────
+    if not product_score:
+        # Count how many customers bought each product key
+        popularity = {}
+        for i in range(len(customers)):
+            for p_idx, qty in enumerate(matrix[i]):
+                if qty > 0:
+                    key = product_keys[p_idx]
+                    if key not in already_bought:
+                        popularity[key] = popularity.get(key, 0) + 1
+
+        # Use popularity as the score
+        product_score = popularity
+
+    if not product_score:
+        return []
+
+    # ── Rank and build results ───────────────────────────────────────────────
     ranked   = sorted(product_score.items(),
                       key=lambda x: x[1], reverse=True)
     top_keys = [k for k, _ in ranked[:top_n]]
@@ -112,7 +133,6 @@ def collaborative_recommend(target, df, matrix, customers,
                 "score":       round(product_score[key], 4)
             })
     return results
-
 
 # ── Content-Based Filtering ──────────────────────────────────────────────────
 

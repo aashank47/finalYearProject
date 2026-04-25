@@ -9,15 +9,18 @@ from recommender import (
     build_user_item_matrix, collaborative_recommend,
     build_product_features, content_based_recommend
 )
+from linear_regression import (train, predict, mean_squared_error,
+                                train_test_split, mean_absolute_error,
+                                r_squared)
 
 app = Flask(__name__)
 
-#  1. Load datasets 
+# ── 1. Load data ──────────────────────────────────────────────────────────────
 
 print("Loading data...")
-df     = load_and_prepare()
-df_rec = df.copy()
-#  2. Train Linear Regression 
+df = load_and_prepare()
+
+# ── 2. Train Linear Regression ────────────────────────────────────────────────
 
 print("\nTraining demand prediction model...")
 prices   = df["Price"].tolist()
@@ -32,14 +35,16 @@ M, B = train(x_train, y_train, learning_rate=0.1, epochs=2000)
 test_preds = [predict(x, M, B) for x in x_test]
 TEST_MSE   = mean_squared_error(y_test, test_preds)
 print(f"Demand model ready. MSE: {TEST_MSE:.6f}")
+TEST_MAE = mean_absolute_error(y_test, test_preds)
+TEST_R2  = r_squared(y_test, test_preds)
 
-# ── 3. Build Recommendation Engine ───────────────────────────────────────────
+# ── 3. Build Recommendation Engine ────────────────────────────────────────────
 
 print("\nBuilding recommendation engine...")
-matrix, customers, products_list, c_idx, p_idx = build_user_item_matrix(df_rec)
-p_vectors, p_details = build_product_features(df_rec)
-print(f"Recommender ready. "
-      f"{len(customers)} customers, {len(products_list)} product types.\n")
+matrix, customers, product_keys, c_idx, p_idx = build_user_item_matrix(df)
+p_vectors, p_details = build_product_features(df)
+print(f"Recommender ready. {len(customers)} customers, "
+      f"{len(product_keys)} product types.\n")
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -49,16 +54,16 @@ print(f"Recommender ready. "
 @app.route("/", methods=["GET"])
 def home():
     return jsonify({
-        "status":   "running",
+        "status": "running",
         "routes": {
-            "GET  /":                    "health check",
-            "GET  /model/info":          "model details",
-            "POST /predict":             "predict demand for one price",
-            "POST /predict/batch":       "predict demand for multiple prices",
-            "POST /recommend/user":      "collaborative filtering",
-            "POST /recommend/product":   "content-based filtering",
-            "GET  /customers":           "sample customer names",
-            "GET  /products":            "sample product codes"
+            "GET  /":                  "health check",
+            "GET  /model/info":        "model details",
+            "POST /predict":           "predict demand for one price",
+            "POST /predict/batch":     "predict for multiple prices",
+            "POST /recommend/user":    "collaborative filtering",
+            "POST /recommend/product": "content-based filtering",
+            "GET  /customers":         "all customer names",
+            "GET  /products":          "all product codes"
         }
     })
 
@@ -74,10 +79,11 @@ def model_info():
         "slope_m":     round(M, 6),
         "intercept_b": round(B, 6),
         "test_mse":    round(TEST_MSE, 6),
+        "test_mae":    round(TEST_MAE, 6),
+        "r_squared":   round(TEST_R2,  6),
         "price_range": {"min": X_MIN, "max": X_MAX},
         "qty_range":   {"min": Y_MIN, "max": Y_MAX}
     })
-
 
 @app.route("/predict", methods=["POST"])
 def predict_demand():
@@ -133,13 +139,13 @@ def recommend_for_user():
         return jsonify({"error": "Send JSON with 'customer_name'"}), 400
 
     recs = collaborative_recommend(
-        data["customer_name"], df_rec,
-        matrix, customers, products_list, c_idx, p_idx
+        data["customer_name"], df,
+        matrix, customers, product_keys, c_idx, p_idx
     )
 
     if not recs:
         return jsonify({
-            "error": "Customer not found or no similar users.",
+            "error": "Customer not found or no recommendations.",
             "tip":   "Use GET /customers to see available names"
         }), 404
 
@@ -175,20 +181,18 @@ def recommend_similar_products():
 
 @app.route("/customers", methods=["GET"])
 def list_customers():
-    """Helper route — returns sample customer names for testing."""
     return jsonify({
-        "total":  len(customers),
-        "sample": customers[:15]
+        "total":     len(customers),
+        "customers": customers
     })
 
 
 @app.route("/products", methods=["GET"])
 def list_products():
-    """Helper route — returns sample product codes for testing."""
     codes = list(p_vectors.keys())
     return jsonify({
-        "total":  len(codes),
-        "sample": codes[:15]
+        "total":    len(codes),
+        "products": codes
     })
 
 

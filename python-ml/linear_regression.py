@@ -17,6 +17,37 @@ def mean_squared_error(actual, predicted):
         total += (actual[i] - predicted[i]) ** 2
     return total / n
 
+def mean_absolute_error(actual, predicted):
+    """
+    MAE: average of |actual - predicted|
+    More intuitive than MSE — same units as the target.
+    """
+    n = len(actual)
+    total = 0
+    for i in range(n):
+        total += abs(actual[i] - predicted[i])
+    return total / n
+
+
+def r_squared(actual, predicted):
+    """
+    R² score: how much variance our model explains.
+    1.0 = perfect. 0.0 = no better than predicting the mean.
+    Negative = worse than predicting the mean.
+    """
+    mean_actual = sum(actual) / len(actual)
+
+    # Total variance in the data
+    ss_total = sum((a - mean_actual) ** 2 for a in actual)
+
+    # Variance our model didn't explain
+    ss_residual = sum((actual[i] - predicted[i]) ** 2
+                      for i in range(len(actual)))
+
+    if ss_total == 0:
+        return 1.0
+
+    return 1 - (ss_residual / ss_total)
 
 def train(x_values, y_values, learning_rate=0.1, epochs=2000):
     m = 0.0
