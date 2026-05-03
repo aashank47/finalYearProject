@@ -1,6 +1,6 @@
 # app.py
 # Flask REST API — serves Linear Regression + Recommendation Engine
-# Phase 1 + Phase 2 complete
+
 
 from flask import Flask, request, jsonify
 from data_prep import load_and_prepare, normalize, denormalize
@@ -15,12 +15,12 @@ from linear_regression import (train, predict, mean_squared_error,
 
 app = Flask(__name__)
 
-# ── 1. Load data ──────────────────────────────────────────────────────────────
+# ── 1. Load data 
 
 print("Loading data...")
 df = load_and_prepare()
 
-# ── 2. Train Linear Regression ────────────────────────────────────────────────
+# ── 2. Train Linear Regression 
 
 print("\nTraining demand prediction model...")
 prices   = df["Price"].tolist()
@@ -38,7 +38,7 @@ print(f"Demand model ready. MSE: {TEST_MSE:.6f}")
 TEST_MAE = mean_absolute_error(y_test, test_preds)
 TEST_R2  = r_squared(y_test, test_preds)
 
-# ── 3. Build Recommendation Engine ────────────────────────────────────────────
+# ── 3. Build Recommendation Engine 
 
 print("\nBuilding recommendation engine...")
 matrix, customers, product_keys, c_idx, p_idx = build_user_item_matrix(df)
@@ -47,9 +47,9 @@ print(f"Recommender ready. {len(customers)} customers, "
       f"{len(product_keys)} product types.\n")
 
 
-# ════════════════════════════════════════════════════════════════════════════
+
 #  DEMAND PREDICTION ROUTES
-# ════════════════════════════════════════════════════════════════════════════
+
 
 @app.route("/", methods=["GET"])
 def home():
@@ -195,6 +195,52 @@ def list_products():
         "products": codes
     })
 
+@app.route("/recommend/by-name", methods=["POST"])
+def recommend_by_name():
+    """
+    Expects: { "product_name": "Apple Laptop" }
+    Searches for a matching product then returns similar ones.
+    """
+    data = request.get_json()
+    if not data or "product_name" not in data:
+        return jsonify({"error": "Send JSON with 'product_name'"}), 400
+
+    search = data["product_name"].lower().strip()
+
+    # Search through product details for a match
+    matched_code = None
+    matched_info = None
+
+    for code, details in p_details.items():
+        full_name = f"{details['brand']} {details['product']}".lower()
+        if search in full_name or full_name in search:
+            matched_code = code
+            matched_info = details
+            break
+
+    if not matched_code:
+        return jsonify({
+            "error": f"No product found matching '{data['product_name']}'",
+            "tip":   "Try names like 'Apple Laptop' or 'Samsung Mobile Phone'"
+        }), 404
+
+    similar = content_based_recommend(matched_code, p_vectors, p_details)
+
+    if not similar:
+        return jsonify({"error": "No similar products found"}), 404
+
+    return jsonify({
+        "searched_for":    data["product_name"],
+        "matched_product": {
+            "product_code": matched_code,
+            "brand":        matched_info["brand"],
+            "product":      matched_info["product"],
+            "price":        matched_info["price"],
+            "ram":          matched_info["ram"]
+        },
+        "algorithm":        "Content-Based Filtering (cosine similarity)",
+        "similar_products": similar
+    })
 
 # ── Start server ──────────────────────────────────────────────────────────────
 

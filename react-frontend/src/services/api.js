@@ -6,7 +6,7 @@ import axios from "axios"
 
 const NODE_API = "http://localhost:4000"
 
-// ── Demand Prediction ─────────────────────────────────────────────────────────
+// Demand Prediction 
 
 export const predictDemand = async (price) => {
     const response = await axios.post(`${NODE_API}/ml/predict`, { price })
@@ -18,7 +18,7 @@ export const predictBatch = async (prices) => {
     return response.data
 }
 
-// ── Recommendations ───────────────────────────────────────────────────────────
+// Recommendations 
 
 export const recommendForUser = async (customerName) => {
     const response = await axios.post(`${NODE_API}/ml/recommend/user`, {
@@ -34,7 +34,7 @@ export const recommendSimilarProducts = async (productCode) => {
     return response.data
 }
 
-// ── Products & Customers ──────────────────────────────────────────────────────
+//  Products & Customers
 
 export const getAllProducts = async () => {
     const response = await axios.get(`${NODE_API}/products`)

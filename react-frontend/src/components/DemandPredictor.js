@@ -1,4 +1,3 @@
-// src/components/DemandPredictor.js
 // Lets user enter a price and see predicted demand.
 // Also shows a chart of demand across price range.
 
@@ -47,7 +46,7 @@ function DemandPredictor() {
             }
             const data = await predictBatch(prices)
             const formatted = data.predictions.map(p => ({
-                price:    `₹${(p.price / 1000).toFixed(0)}k`,
+                price:    `Rs${(p.price / 1000).toFixed(0)}k`,
                 quantity: p.predicted_quantity
             }))
             setChartData(formatted)
@@ -68,7 +67,7 @@ function DemandPredictor() {
 
             {/* Input */}
             <div style={styles.inputRow}>
-                <span style={styles.rupee}>₹</span>
+                <span style={styles.rupee}>Rs</span>
                 <input
                     type="number"
                     value={price}
@@ -105,10 +104,18 @@ function DemandPredictor() {
                         </span>
                     </div>
                     <div style={styles.divider} />
-                    <div style={styles.resultItem}>
-                        <span style={styles.label}>Model MSE</span>
-                        <span style={styles.value}>{result.model_mse}</span>
-                    </div>
+<div style={styles.resultItem}>
+    <span style={styles.label}>Model MSE</span>
+    <span style={styles.value}>{result.model_mse}</span>
+    <span style={{fontSize:"12px", color:"#888", marginTop:"4px"}}>
+        {result.model_mse < 0.05
+            ? "Excellent accuracy"
+            : result.model_mse < 0.15
+            ? "Moderate — acceptable for single-feature model"
+            : "High — more features would improve this"
+        }
+    </span>
+</div>
                 </div>
             )}
 

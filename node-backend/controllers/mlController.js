@@ -121,10 +121,39 @@ const getModelInfo = async (req, res) => {
     }
 }
 
+const recommendByName = async (req, res) => {
+    try {
+        const { product_name } = req.body
+
+        if (!product_name) {
+            return res.status(400).json({
+                error: "Send a 'product_name' field"
+            })
+        }
+
+        const response = await axios.post(
+            `${PYTHON_API}/recommend/by-name`,
+            { product_name: product_name }
+        )
+        res.json(response.data)
+
+    } catch (error) {
+        if (error.response && error.response.status === 404) {
+            return res.status(404).json(error.response.data)
+        }
+        res.status(500).json({
+            error:   "ML service error",
+            details: error.message
+        })
+    }
+}
+
+
 module.exports = {
     predictDemand,
     predictBatch,
     recommendForUser,
     recommendSimilarProducts,
+    recommendByName,
     getModelInfo
 }

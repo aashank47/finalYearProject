@@ -1,5 +1,3 @@
-// models/Customer.js
-// Defines the shape of a Customer document in MongoDB
 
 const mongoose = require("mongoose")
 
